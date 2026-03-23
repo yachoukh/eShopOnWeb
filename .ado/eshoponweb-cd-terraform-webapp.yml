@@ -1,0 +1,53 @@
+#NAME THE PIPELINE SAME AS FILE (WITHOUT ".yml")
+
+# Trigger CD when Terraform CI executes successfully.
+resources:
+  pipelines:
+    - pipeline: eshoponweb-ci-terraform-webapp
+      source: eshoponweb-ci-terraform-webapp
+      trigger: true
+
+
+variables:
+  # These values come from the current Terraform deployment in /workspaces/eshop-iac.
+  # Only the Azure DevOps service connection name still needs to be updated for your org.
+  resource-group: 'rg-eshop-dev'
+  subscriptionid: 'cce4821e-8fe3-433d-9976-4c5bc0b4eee7'
+  azureserviceconnection: 'azure subs'
+  webappname: 'app-web-082f19a477bb3'
+  webappurl: 'https://app-web-082f19a477bb3.azurewebsites.net'
+
+
+stages:
+- stage: Deploy
+  displayName: Deploy to Terraform WebApp
+  jobs:
+  - job: Deploy
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+    - download: eshoponweb-ci-terraform-webapp
+
+    - task: AzureAppServiceSettings@1
+      displayName: Configure App Service settings for Azure runtime
+      inputs:
+        azureSubscription: '$(azureserviceconnection)'
+        appName: '$(webappname)'
+        resourceGroupName: '$(resource-group)'
+        appSettings: |
+          [
+            {
+              "name": "CatalogBaseUrl",
+              "value": "$(webappurl)",
+              "slotSetting": false
+            }
+          ]
+
+    - task: AzureRmWebAppDeployment@4
+      displayName: Publish Website to Terraform WebApp
+      inputs:
+        ConnectionType: 'AzureRM'
+        azureSubscription: '$(azureserviceconnection)'
+        appType: 'webAppLinux'
+        WebAppName: '$(webappname)'
+        packageForLinux: '$(Pipeline.Workspace)/eshoponweb-ci-terraform-webapp/Website/Web.zip'
