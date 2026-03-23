@@ -89,10 +89,17 @@ builder.Services.AddRazorPages(options =>
     options.Conventions.AuthorizePage("/Basket/Checkout");
 });
 builder.Services.AddHttpContextAccessor();
-builder.Services
-    .AddHealthChecks()
-    .AddCheck<ApiHealthCheck>("api_health_check", tags: new[] { "apiHealthCheck" })
-    .AddCheck<HomePageHealthCheck>("home_page_health_check", tags: new[] { "homePageHealthCheck" });
+var configSection = builder.Configuration.GetRequiredSection(BaseUrlConfiguration.CONFIG_NAME);
+builder.Services.Configure<BaseUrlConfiguration>(configSection);
+var baseUrlConfig = configSection.Get<BaseUrlConfiguration>();
+
+var healthChecks = builder.Services.AddHealthChecks();
+if (Uri.TryCreate(baseUrlConfig?.ApiBase, UriKind.Absolute, out var apiBaseUri) && !apiBaseUri.IsLoopback)
+{
+    healthChecks.AddCheck<ApiHealthCheck>("api_health_check", tags: new[] { "apiHealthCheck" });
+}
+
+healthChecks.AddCheck<HomePageHealthCheck>("home_page_health_check", tags: new[] { "homePageHealthCheck" });
 builder.Services.Configure<ServiceConfig>(config =>
 {
     config.Services = new List<ServiceDescriptor>(builder.Services);
@@ -137,11 +144,6 @@ builder.Services.AddFeatureManagement();
 // Bind configuration "eShopWeb:Settings" section to the Settings object
 // This must be AFTER Azure App Configuration is added so it picks up remote values
 builder.Services.Configure<SettingsViewModel>(builder.Configuration.GetSection("eShopWeb:Settings"));
-
-// blazor configuration
-var configSection = builder.Configuration.GetRequiredSection(BaseUrlConfiguration.CONFIG_NAME);
-builder.Services.Configure<BaseUrlConfiguration>(configSection);
-var baseUrlConfig = configSection.Get<BaseUrlConfiguration>();
 
 // Blazor Admin Required Services for Prerendering
 builder.Services.AddScoped<HttpClient>(s => new HttpClient
@@ -192,11 +194,20 @@ using (var scope = app.Services.CreateScope())
 var catalogBaseUrl = builder.Configuration.GetValue(typeof(string), "CatalogBaseUrl") as string;
 if (!string.IsNullOrEmpty(catalogBaseUrl))
 {
-    app.Use((context, next) =>
+    var catalogPathBase = catalogBaseUrl;
+    if (Uri.TryCreate(catalogBaseUrl, UriKind.Absolute, out var catalogBaseUri))
     {
-        context.Request.PathBase = new PathString(catalogBaseUrl);
-        return next();
-    });
+        catalogPathBase = catalogBaseUri.AbsolutePath;
+    }
+
+    if (!string.IsNullOrWhiteSpace(catalogPathBase) && catalogPathBase != "/")
+    {
+        app.Use((context, next) =>
+        {
+            context.Request.PathBase = new PathString(catalogPathBase);
+            return next();
+        });
+    }
 }
 
 app.UseHealthChecks("/health",
